@@ -10,16 +10,30 @@ datasource db {
 enum Role {
   CUSTOMER
   STORE
+  // ✅ เพิ่มสำหรับ Admin
+  ADMIN
+}
+
+// ✅ เพิ่ม: สถานะบัญชี (ใช้สำหรับ “ระงับ/ปลดระงับ”)
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
 }
 
 model User {
-  id             Int       @id @default(autoincrement())
-  email          String    @unique
-  passwordHash   String
-  role           Role
+  id              Int       @id @default(autoincrement())
+  email           String    @unique
+  passwordHash    String
+  role            Role
   emailVerifiedAt DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // ✅ เพิ่ม: สถานะ + ข้อมูลระงับ + เวลา login ล่าสุด
+  status          UserStatus @default(ACTIVE)
+  suspendedAt     DateTime?
+  suspendedReason String?
+  lastLoginAt     DateTime?
 
   customerProfile CustomerProfile?
   storeProfile    StoreProfile?
@@ -39,6 +53,14 @@ model User {
 
   // เพิ่ม: ความสัมพันธ์กับ Notification
   notifications Notification[]
+
+  // ✅ เพิ่ม: สำหรับ Admin (Logs / Security / Complaints)
+  auditLogs      AuditLog[]      @relation("AuditLogsActor")
+  securityEvents SecurityEvent[] @relation("SecurityEventsUser")
+  complaints     Complaint[]     @relation("ComplaintsUser")
+
+  @@index([role])
+  @@index([status])
 }
 
 model CustomerProfile {
@@ -116,21 +138,21 @@ model Warranty {
 }
 
 model WarrantyItem {
-  id         String   @id @default(cuid())
-  warrantyId String
-  warranty   Warranty @relation(fields: [warrantyId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  warrantyId  String
+  warranty    Warranty @relation(fields: [warrantyId], references: [id], onDelete: Cascade)
 
-  productName   String
-  model         String?
-  serial        String?
-  purchaseDate  DateTime
-  expiryDate    DateTime?
+  productName    String
+  model          String?
+  serial         String?
+  purchaseDate   DateTime
+  expiryDate     DateTime?
   durationMonths Int?
-  durationDays  Int?
-  coverageNote  String?
-  note          String?
-  documents     Json?
-  images        Json?
+  durationDays   Int?
+  coverageNote   String?
+  note           String?
+  documents      Json?
+  images         Json?
 
   // ★ หมายเหตุโดย "ลูกค้า"
   customerNote String?
@@ -144,30 +166,30 @@ model WarrantyItem {
 
 /// เก็บฟีดแบ็กความพึงพอใจจากผู้ใช้
 model Satisfaction {
-  id         Int      @id @default(autoincrement())
-  rating     Int      // 1..5
-  comment    String?
-  
-  userId     Int?     // user ที่ให้ฟีดแบ็ก (nullable)
+  id      Int     @id @default(autoincrement())
+  rating  Int     // 1..5
+  comment String?
+
+  userId Int?
   // ★ เติมชื่อ Relation: SatisfactionGiven
-  user       User?    @relation("SatisfactionGiven", fields: [userId], references: [id], onDelete: SetNull)
-  
-  storeId    Int?     // ถ้าฟีดแบ็กเกี่ยวกับร้าน
+  user   User? @relation("SatisfactionGiven", fields: [userId], references: [id], onDelete: SetNull)
+
+  storeId Int?
   // ★ เติมชื่อ Relation: SatisfactionReceived
-  store      User?    @relation("SatisfactionReceived", fields: [storeId], references: [id], onDelete: SetNull)
-  
-  warrantyId String?  // หากให้คะแนนเกี่ยวกับใบรับประกัน
+  store   User? @relation("SatisfactionReceived", fields: [storeId], references: [id], onDelete: SetNull)
+
+  warrantyId String?
   createdAt  DateTime @default(now())
 }
 
 model Notification {
-  id        Int      @id @default(autoincrement())
-  
-  userId    Int?     // recipient user (customer or store owner)
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  storeId   Int?     // เก็บ storeId อ้างอิง (option)
-  
+  id Int @id @default(autoincrement())
+
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  storeId Int?
+
   title     String
   body      String
   data      Json?
@@ -176,4 +198,69 @@ model Notification {
 
   @@index([userId])
   @@index([storeId])
+}
+
+/* =========================================================
+ * ✅ เพิ่ม: Admin Models
+ * ========================================================= */
+
+model AuditLog {
+  id          String   @id @default(cuid())
+
+  actorUserId Int?
+  actor       User?    @relation("AuditLogsActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  action      String
+  targetType  String?
+  targetId    String?
+
+  ip          String?
+  userAgent   String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  type      String
+
+  email     String?
+  userId    Int?
+  user      User?    @relation("SecurityEventsUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  ip        String?
+  userAgent String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+model Complaint {
+  id        String          @id @default(cuid())
+
+  userId    Int?
+  user      User?           @relation("ComplaintsUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  category  String?
+  subject   String
+  message   String
+  status    ComplaintStatus @default(OPEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
 }

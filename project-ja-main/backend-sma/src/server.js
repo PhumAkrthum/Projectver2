@@ -17,6 +17,9 @@ import customerRoutes from './routes/customer.routes.js';
 import statsRoutes from './routes/stats.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 
+// ✅ NEW: Admin routes
+import adminRoutes from './routes/admin.routes.js';
+
 // Swagger
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './docs/swagger.js';
@@ -26,17 +29,34 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ CORS: อนุญาตส่ง Authorization + credentials
+/* =========================================================
+ * ✅ CORS: รองรับทั้งหน้าเว็บเดิม + หน้า Admin (แยก frontend)
+ * - คง behavior เดิมไว้ (credentials + Authorization header)
+ * - เพิ่ม allow หลาย origin ด้วย callback
+ * ========================================================= */
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  process.env.FRONTEND_ADMIN_URL || 'http://localhost:5174',
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, cb) => {
+      // allow curl/postman/no-origin
+      if (!origin) return cb(null, true);
+
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+
+      // ถ้าต้องการ “เข้ม” ให้ block ตามเดิม
+      return cb(new Error(`CORS blocked: ${origin}`));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
 
-// ⬇️ เพิ่ม limit เพื่อแก้ 413 Payload Too Large (เช่นตอนส่งรูปโปรไฟล์แบบ base64)
+// ⬇️ คงของเดิม: เพิ่ม limit เพื่อแก้ 413 Payload Too Large (เช่นตอนส่งรูปโปรไฟล์แบบ base64)
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
@@ -59,11 +79,14 @@ app.use('/store', storeRoutes);
 app.use('/warranties', warrantyRoutes);
 app.use('/warranty-items', warrantyItemRoutes);
 
-// ✅ เพิ่ม: ผูกเส้นทางฝั่งลูกค้า (ดู/ค้นหาใบรับประกันของตัวเอง, เพิ่มหมายเหตุ, ดาวน์โหลด PDF)
+// ✅ คงของเดิม: ฝั่งลูกค้า
 app.use('/customer', customerRoutes);
 app.use('/notifications', notificationsRoutes);
 // public misc endpoints (stats, feedback)
 app.use('/public', statsRoutes);
+
+// ✅ NEW: ผูกเส้นทาง Admin (หลังบ้านแยก frontend แต่ใช้ backend เดิม)
+app.use('/admin', adminRoutes);
 
 // Multer & Validation errors → ตอบ 400 แทน 500
 app.use((err, _req, res, next) => {
@@ -92,4 +115,5 @@ const baseUrl =
 app.listen(port, () => {
   console.log(`🚀 API running on ${baseUrl}`);
   console.log(`📚 Swagger UI -> ${baseUrl}/docs`);
+  console.log(`✅ Allowed origins: ${allowedOrigins.join(', ')}`);
 });
